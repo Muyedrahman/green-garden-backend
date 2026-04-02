@@ -4,9 +4,9 @@ const cors = require('cors')
 const { MongoClient, ServerApiVersion } = require('mongodb')
 const admin = require('firebase-admin')
 const port = process.env.PORT || 3000
-const decoded = Buffer.from(process.env.FB_SERVICE_KEY, 'base64').toString(
-  'utf-8'
-)
+const decoded = Buffer.from(process.env.FB_SERVICE_KEY, "base64").toString(
+  "utf-8",
+);
 const serviceAccount = JSON.parse(decoded)
 admin.initializeApp({
   credential: admin.credential.cert(serviceAccount),
@@ -53,11 +53,21 @@ const client = new MongoClient(process.env.MONGODB_URI, {
 })
 async function run() {
   try {
+    // await client.connect();
+    const db = client.db("plantsDB");
+    const plantsCollection = db.collection("plants");
+
+    // Save  a piant data in
+    app.post('/plants', async(req, res)=>{
+      const plantData = req.body
+      const result = await plantsCollection.insertOne(plantData)
+    })
+
     // Send a ping to confirm a successful connection
-    await client.db('admin').command({ ping: 1 })
+    await client.db("admin").command({ ping: 1 });
     console.log(
-      'Pinged your deployment. You successfully connected to MongoDB!'
-    )
+      "Pinged your deployment. You successfully connected to MongoDB!",
+    );
   } finally {
     // Ensures that the client will close when you finish/error
   }
