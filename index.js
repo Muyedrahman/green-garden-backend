@@ -18,11 +18,7 @@ const app = express();
 // middleware
 app.use(
   cors({
-    origin: [
-      "http://localhost:5173",
-      "http://localhost:5174",
-      "https://b12-m11-session.web.app",
-    ],
+    origin: [process.env.CLIENT_DOMAIN],
     credentials: true,
     optionSuccessStatus: 200,
   }),
@@ -74,24 +70,42 @@ async function run() {
     });
 
     //Payment endpoints
-    app.post('/create-checkout-session', async (req, res) =>{
+    app.post("/create-checkout-session", async (req, res) => {
       const paymentInfo = req.body;
-      console.log(paymentInfo)
-      // const session = await stripe.checkout.session.create({
-      //   line_items: [
-      //     {
-      //       price: "price_1MotwRLkdIwHu7ixYcPLm5uZ",
-      //       quantity: 2,
-      //     },
-      //   ],
-      //   mode: "payment",
-      // });
-    })
+      console.log(paymentInfo);
+      // res.send(paymentInfo);
+      const session = await stripe.checkout.sessions.create({
+        line_items: [
+          {
+            // "price_1MotwRLkdIwHu7ixYcPLm5uZ"
+            price_data: {
+              currency: "usd",
+              product_data: {
+                name: paymentInfo?.description,
+                images: [paymentInfo?.image],
+              },
+              unit_amount: paymentInfo?.price * 100,
+            },
+            quantity: paymentInfo?.quantity,
+          },
+        ],
+        customer_email: paymentInfo?.customer?.email,
+        mode: "payment",
+        metadata: {
+          plantId: paymentInfo?.plantId,
+          customerName: paymentInfo?.customer?.name,
+          customerEmail: paymentInfo?.customer?.email,
+        },
+        success_url: `${process.env.CLIENT_DOMAIN}/payment-success`,
+        cancel_url: `${process.env.CLIENT_DOMAIN}/plant/${paymentInfo?.plantId}`,
+      });
+      res.send({ url: session.url });
+    });
 
     // get Single plants from db
     app.get("/plants/:id", async (req, res) => {
-      const id = req.params.id
-      const result = await plantsCollection.findOne({ _id: new ObjectId(id)});
+      const id = req.params.id;
+      const result = await plantsCollection.findOne({ _id: new ObjectId(id) });
       res.send(result);
     });
 
