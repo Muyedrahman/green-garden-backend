@@ -54,9 +54,7 @@ async function run() {
   try {
     const db = client.db("plantsDB");
     const plantsCollection = db.collection("plants");
-    const ordersCollection = db.collection('orders')
-
-
+    const ordersCollection = db.collection("orders");
 
     // Save a plant data in db
     app.post("/plants", async (req, res) => {
@@ -130,8 +128,11 @@ async function run() {
         _id: new ObjectId(session.metadata.plantId),
       });
 
+      const order = await ordersCollection.findOne({
+        transactionId: session.payment_intent,
+      });
 
-      if (session.status === 'complete'){
+      if (session.status === "complete" && plant && !order) {
         // save order data in db
         const orderInfo = {
           plantId: session.metadata.plantId,
@@ -146,10 +147,28 @@ async function run() {
           price: session.amount_total / 100,
         };
         // console.log(orderInfo);
-        const result = await ordersCollection.insertOne(orderInfo)
+        const result = await ordersCollection.insertOne(orderInfo);
+        // Update plant quantity
+        await plantsCollection.updateOne(
+          {
+            _id: new ObjectId(session.metadata.plantId),
+          },
+          {
+            $inc: { quantity: -1 },
+          },
+        );
+        return res.send({
+          transactionId: session.payment_intent,
+          orderId: result.insertedId,
+        });
       }
+      res.send({
+        transactionId: session.payment_intent,
+        orderId: order._id,
+      });
     });
 
+    
     // get Single plants from db
     app.get("/plants/:id", async (req, res) => {
       const id = req.params.id;
