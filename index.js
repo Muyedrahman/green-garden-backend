@@ -70,6 +70,13 @@ async function run() {
       res.send(result);
     });
 
+    // get Single plants from db
+    app.get("/plants/:id", async (req, res) => {
+      const id = req.params.id;
+      const result = await plantsCollection.findOne({ _id: new ObjectId(id) });
+      res.send(result);
+    });
+
     //1.Payment endpoints
     app.post("/create-checkout-session", async (req, res) => {
       try {
@@ -108,6 +115,7 @@ async function run() {
             plantId: paymentInfo?.plantId,
             buyerEmail: paymentInfo?.customer?.email,
             sellerEmail: paymentInfo?.seller?.email,
+            // quantity: String(paymentInfo?.quantity || 1),
           },
         });
 
@@ -144,7 +152,9 @@ async function run() {
           name: plant.name,
           category: plant.category,
           quantity: 1,
+          // quantity: Number(session.metadata.quantity) || 1,
           price: session.amount_total / 100,
+          image: plant?.image,
         };
         // console.log(orderInfo);
         const result = await ordersCollection.insertOne(orderInfo);
@@ -168,13 +178,29 @@ async function run() {
       });
     });
 
-    
-    // get Single plants from db
-    app.get("/plants/:id", async (req, res) => {
-      const id = req.params.id;
-      const result = await plantsCollection.findOne({ _id: new ObjectId(id) });
-      res.send(result);
-    });
+    // get all orders for a customer by email
+    app.get('/my-orders/:email', async (req, res) =>{
+      const email = req.params.email
+
+    const result = await ordersCollection.find({ customer: email }).toArray();
+    res.send(result)
+    })
+
+    // get ALL orders for a SELLIR by email
+    app.get('/manage-orders/:email', async (req, res) =>{
+      const email = req.params.email
+
+    const result = await ordersCollection.find({ 'seller.email': email }).toArray();
+    res.send(result)
+    })
+    // get aLL Plants for a SELLIR by email
+    app.get('/my-inventory/:email', async (req, res) =>{
+      const email = req.params.email
+
+    const result = await plantsCollection.find({ 'seller.email': email }).toArray();
+    res.send(result)
+    })
+
 
     // Send a ping to cenfirm a success ful connection
     await client.db("admin").command({ ping: 1 });
