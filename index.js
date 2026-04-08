@@ -6,21 +6,31 @@ const { MongoClient, ServerApiVersion, ObjectId } = require("mongodb");
 const stripe = require("stripe")(process.env.STRIPE_SECRET_KEY);
 const admin = require("firebase-admin");
 const port = process.env.PORT || 3000;
-
 const serviceAccount = require("./serviceAccountKey.json");
 
 admin.initializeApp({
   credential: admin.credential.cert(serviceAccount),
 });
-
 const app = express();
-
 // middleware
+// app.use(
+//   cors({
+//     origin: [process.env.CLIENT_DOMAIN],
+//     credentials: true,
+//     optionSuccessStatus: 200,
+//   }),
+// );
+// app.use(express.json());
+
 app.use(
   cors({
-    origin: [process.env.CLIENT_DOMAIN],
+    origin: [
+      process.env.CLIENT_DOMAIN, // .env থেকে আসবে
+      "http://localhost:5173", // ডিফল্ট Vite পোর্ট
+      "http://localhost:5176", // আপনার বর্তমানে ব্যবহৃত পোর্ট
+    ],
     credentials: true,
-    optionSuccessStatus: 200,
+    optionsSuccessStatus: 200, // এখানে একটি 's' যোগ হবে (optionsSuccessStatus)
   }),
 );
 app.use(express.json());
@@ -40,7 +50,6 @@ const verifyJWT = async (req, res, next) => {
     return res.status(401).send({ message: "Unauthorized Access!", err });
   }
 };
-
 // MongoDB client
 const client = new MongoClient(process.env.MONGODB_URI, {
   serverApi: {
@@ -49,12 +58,13 @@ const client = new MongoClient(process.env.MONGODB_URI, {
     deprecationErrors: true,
   },
 });
-
 async function run() {
   try {
     const db = client.db("plantsDB");
     const plantsCollection = db.collection("plants");
     const ordersCollection = db.collection("orders");
+    const usersCollection = db.collection("users");
+
 
     // Save a plant data in db
     app.post("/plants", async (req, res) => {
@@ -81,14 +91,10 @@ async function run() {
     app.post("/create-checkout-session", async (req, res) => {
       try {
         const paymentInfo = req.body;
-
-        // Stripe শুধুমাত্র HTTPS ইমেজ সাপোর্ট করে।
-        // গুগল প্রোফাইল পিকচার বা লোকাল ইমেজ থাকলে তা বাদ দিয়ে পেমেন্ট সেশন তৈরি করবে।
         const stripeImages =
           paymentInfo?.image && paymentInfo.image.startsWith("https")
             ? [paymentInfo.image]
             : [];
-
         const session = await stripe.checkout.sessions.create({
           payment_method_types: ["card"],
           line_items: [
@@ -115,10 +121,8 @@ async function run() {
             plantId: paymentInfo?.plantId,
             buyerEmail: paymentInfo?.customer?.email,
             sellerEmail: paymentInfo?.seller?.email,
-            // quantity: String(paymentInfo?.quantity || 1),
           },
         });
-
         res.send({ url: session.url });
       } catch (err) {
         console.error("Stripe Error:", err.message);
@@ -135,7 +139,6 @@ async function run() {
       const plant = await plantsCollection.findOne({
         _id: new ObjectId(session.metadata.plantId),
       });
-
       const order = await ordersCollection.findOne({
         transactionId: session.payment_intent,
       });
@@ -152,11 +155,9 @@ async function run() {
           name: plant.name,
           category: plant.category,
           quantity: 1,
-          // quantity: Number(session.metadata.quantity) || 1,
           price: session.amount_total / 100,
           image: plant?.image,
         };
-        // console.log(orderInfo);
         const result = await ordersCollection.insertOne(orderInfo);
         // Update plant quantity
         await plantsCollection.updateOne(
@@ -179,44 +180,79 @@ async function run() {
     });
 
     // get all orders for a customer by email
-    app.get('/my-orders/:email', async (req, res) =>{
-      const email = req.params.email
+    app.get("/my-orders/:email", async (req, res) => {
+      const email = req.params.email;
 
-    const result = await ordersCollection.find({ customer: email }).toArray();
-    res.send(result)
-    })
+      const result = await ordersCollection.find({ customer: email }).toArray();
+      res.send(result);
+    });
 
     // get ALL orders for a SELLIR by email
-    app.get('/manage-orders/:email', async (req, res) =>{
-      const email = req.params.email
-
-    const result = await ordersCollection.find({ 'seller.email': email }).toArray();
-    res.send(result)
-    })
+    app.get("/manage-orders/:email", async (req, res) => {
+      const email = req.params.email;
+      const result = await ordersCollection
+        .find({ "seller.email": email })
+        .toArray();
+      res.send(result);
+    });
     // get aLL Plants for a SELLIR by email
-    app.get('/my-inventory/:email', async (req, res) =>{
-      const email = req.params.email
+    app.get("/my-inventory/:email", async (req, res) => {
+      const email = req.params.email;
+      const result = await plantsCollection
+        .find({ "seller.email": email })
+        .toArray();
+      res.send(result);
+    });
 
-    const result = await plantsCollection.find({ 'seller.email': email }).toArray();
-    res.send(result)
+    // Save or update a user in db
+    app.post('/user', async(req, res) =>{
+      const userData = req.body;
+      userData.created_at = new Date().toISOString()
+      userData.last_loggedIn = new Date().toISOString()
+      userData.role = 'customer'
+      
+      const query = {
+        email: userData.email,
+      };
+      const alreadyExists = await usersCollection.findOne(query)
+      console.log(' user already Exists ---->>', !!alreadyExists)
+      if(alreadyExists){
+        console.log('Updating user info.......')
+        const result = await usersCollection.updateOne(query, {
+          $set: {
+            last_loggedIn: new Date().toISOString(),
+          },
+        });
+        return res.send(result);
+      }
+
+      console.log("Saving new user info.......");
+      const result = await usersCollection.insertOne(userData)
+      res.send(result);
     })
+    // Save or update a user in db
+    // app.post("/user", async (req, res) => {
+    //   const user = req.body;
+    //   const query = { email: user?.email };
+    //   const options = { upsert: true };
+    //   const updateDoc = {
+    //     $set: { ...user, timestamp: Date.now() },
+    //   };
+    //   const result = await usersCollection.updateOne(query, updateDoc, options);
+    //   res.send(result);
+    // });
 
-
-    // Send a ping to cenfirm a success ful connection
+    // Send a ping to cenfirm a success-ful connection
     await client.db("admin").command({ ping: 1 });
     console.log(
       "Pinged your deployment. You successfully connected to MongoDB!",
     );
-  } finally {
-    // client will remain connected
-  }
+  } finally {}
 }
 run().catch(console.dir);
-
 app.get("/", (req, res) => {
   res.send("Hello from Server...");
 });
-
 app.listen(port, () => {
   console.log(`Server is running on port ${port}`);
 });
