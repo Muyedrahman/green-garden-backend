@@ -64,6 +64,7 @@ async function run() {
     const plantsCollection = db.collection("plants");
     const ordersCollection = db.collection("orders");
     const usersCollection = db.collection("users");
+    const sellerRequestsCollection = db.collection('sellerRequests')
 
 
     // Save a plant data in db
@@ -246,6 +247,39 @@ async function run() {
       const result = await usersCollection.findOne({email: req.tokenEmail })
       res.send({role: result?.role})
     })
+
+    // Save become-seller request --1commit
+    app.post('/become-seller', verifyJWT, async (req, res) =>{
+      const email = req.tokenEmail
+      const alreadyExists = await sellerRequestsCollection.findOne({ email })
+      if(alreadyExists)
+        return res.status(409).send({message: 'Already requestes, wait koro.'})
+      const result = await sellerRequestsCollection.insertOne({ email })
+      res.send(result)
+    });
+
+    // get all seller requests for admin--  2commit
+    app.get('/seller-requests', verifyJWT, async (req, res) =>{
+      const result = await sellerRequestsCollection.find().toArray()
+      res.send(result)
+    })
+    // get all users for admin  --  4commit
+    app.get('/users', verifyJWT, async (req, res) =>{
+      const adminEmail = req.tokenEmail
+      const result = await usersCollection
+        .find({ email: { $ne: adminEmail } })
+        .toArray();
+      res.send(result)
+    })
+
+    // update a user's role --3
+    app.patch('/update-role', verifyJWT, async(req, res) =>{
+      const {email, role} = req.body
+      const result = await usersCollection.updateOne({email}, {$set: {role}})
+      await sellerRequestsCollection.deleteOne({email})
+
+      res.send(result)
+    } )
 
     // Send a ping to cenfirm a success-ful connection
     await client.db("admin").command({ ping: 1 });
