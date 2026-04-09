@@ -25,12 +25,12 @@ const app = express();
 app.use(
   cors({
     origin: [
-      process.env.CLIENT_DOMAIN, // .env থেকে আসবে
-      "http://localhost:5173", // ডিফল্ট Vite পোর্ট
-      "http://localhost:5176", // আপনার বর্তমানে ব্যবহৃত পোর্ট
+      process.env.CLIENT_DOMAIN,  
+      "http://localhost:5173",  
+      "http://localhost:5176",  
     ],
     credentials: true,
-    optionsSuccessStatus: 200, // এখানে একটি 's' যোগ হবে (optionsSuccessStatus)
+    optionsSuccessStatus: 200,  
   }),
 );
 app.use(express.json());
@@ -43,10 +43,10 @@ const verifyJWT = async (req, res, next) => {
   try {
     const decoded = await admin.auth().verifyIdToken(token);
     req.tokenEmail = decoded.email;
-    console.log(decoded);
+    // console.log(decoded);
     next();
   } catch (err) {
-    console.log(err);
+    // console.log(err);
     return res.status(401).send({ message: "Unauthorized Access!", err });
   }
 };
@@ -64,11 +64,34 @@ async function run() {
     const plantsCollection = db.collection("plants");
     const ordersCollection = db.collection("orders");
     const usersCollection = db.collection("users");
-    const sellerRequestsCollection = db.collection('sellerRequests')
+    const sellerRequestsCollection = db.collection("sellerRequests");
 
+    // Role middlewares verifyADMIN
+    const verifyADMIN = async (req, res, next) => {
+      const email = req.tokenEmail;
+      const user = await usersCollection.findOne({ email });
+      if (user?.role !== "admin")
+        return res
+          .status(403)
+          .send({ message: "Admin only Actions!", role: user?.role });
+
+      next();
+    };
+
+    // Role middlewares
+    const verifySELLER = async (req, res, next) => {
+      const email = req.tokenEmail;
+      const user = await usersCollection.findOne({ email });
+      if (user?.role !== "seller")
+        return res
+          .status(403)
+          .send({ message: "Seller only Actions!", role: user?.role });
+
+      next();
+    };
 
     // Save a plant data in db
-    app.post("/plants", async (req, res) => {
+    app.post("/plants", verifyJWT, verifySELLER, async (req, res) => {
       const plantData = req.body;
       console.log(plantData);
       const result = await plantsCollection.insertOne(plantData);
@@ -182,13 +205,14 @@ async function run() {
 
     // get all orders for a customer by email
     app.get("/my-orders", verifyJWT, async (req, res) => {
-      
-      const result = await ordersCollection.find({ customer: req.tokenEmail }).toArray();
+      const result = await ordersCollection
+        .find({ customer: req.tokenEmail })
+        .toArray();
       res.send(result);
     });
 
     // get ALL orders for a SELLIR by email
-    app.get("/manage-orders/:email", async (req, res) => {
+    app.get("/manage-orders/:email",verifyJWT, verifySELLER, async (req, res) => {
       const email = req.params.email;
       const result = await ordersCollection
         .find({ "seller.email": email })
@@ -196,28 +220,33 @@ async function run() {
       res.send(result);
     });
     // get aLL Plants for a SELLIR by email
-    app.get("/my-inventory/:email", async (req, res) => {
-      const email = req.params.email;
-      const result = await plantsCollection
-        .find({ "seller.email": email })
-        .toArray();
-      res.send(result);
-    });
+    app.get(
+      "/my-inventory/:email",
+      verifyJWT,
+      verifySELLER,
+      async (req, res) => {
+        const email = req.params.email;
+        const result = await plantsCollection
+          .find({ "seller.email": email })
+          .toArray();
+        res.send(result);
+      },
+    );
 
     // Save or update a user in db
-    app.post('/user', async(req, res) =>{
+    app.post("/user", async (req, res) => {
       const userData = req.body;
-      userData.created_at = new Date().toISOString()
-      userData.last_loggedIn = new Date().toISOString()
-      userData.role = 'customer'
-      
+      userData.created_at = new Date().toISOString();
+      userData.last_loggedIn = new Date().toISOString();
+      userData.role = "customer";
+
       const query = {
         email: userData.email,
       };
-      const alreadyExists = await usersCollection.findOne(query)
-      console.log(' user already Exists ---->>', !!alreadyExists)
-      if(alreadyExists){
-        console.log('Updating user info.......')
+      const alreadyExists = await usersCollection.findOne(query);
+      console.log(" user already Exists ---->>", !!alreadyExists);
+      if (alreadyExists) {
+        console.log("Updating user info.......");
         const result = await usersCollection.updateOne(query, {
           $set: {
             last_loggedIn: new Date().toISOString(),
@@ -227,9 +256,9 @@ async function run() {
       }
 
       console.log("Saving new user info.......");
-      const result = await usersCollection.insertOne(userData)
+      const result = await usersCollection.insertOne(userData);
       res.send(result);
-    })
+    });
     // Save or update a user in db
     // app.post("/user", async (req, res) => {
     //   const user = req.body;
@@ -243,43 +272,48 @@ async function run() {
     // });
 
     // get a user's role
-    app.get('/user/role', verifyJWT, async (req, res) =>{
-      const result = await usersCollection.findOne({email: req.tokenEmail })
-      res.send({role: result?.role})
-    })
-
-    // Save become-seller request --1commit
-    app.post('/become-seller', verifyJWT, async (req, res) =>{
-      const email = req.tokenEmail
-      const alreadyExists = await sellerRequestsCollection.findOne({ email })
-      if(alreadyExists)
-        return res.status(409).send({message: 'Already requestes, wait koro.'})
-      const result = await sellerRequestsCollection.insertOne({ email })
-      res.send(result)
+    app.get("/user/role", verifyJWT, async (req, res) => {
+      const result = await usersCollection.findOne({ email: req.tokenEmail });
+      res.send({ role: result?.role });
     });
 
-    // get all seller requests for admin--  2commit
-    app.get('/seller-requests', verifyJWT, async (req, res) =>{
-      const result = await sellerRequestsCollection.find().toArray()
-      res.send(result)
-    })
-    // get all users for admin  --  4commit
-    app.get('/users', verifyJWT, async (req, res) =>{
-      const adminEmail = req.tokenEmail
+    // Save become-seller request
+    app.post("/become-seller", verifyJWT, async (req, res) => {
+      const email = req.tokenEmail;
+      const alreadyExists = await sellerRequestsCollection.findOne({ email });
+      if (alreadyExists)
+        return res
+          .status(409)
+          .send({ message: "Already requestes, wait koro." });
+      const result = await sellerRequestsCollection.insertOne({ email });
+      res.send(result);
+    });
+
+    // get all seller requests for admin
+    app.get("/seller-requests", verifyJWT, verifyADMIN, async (req, res) => {
+      const result = await sellerRequestsCollection.find().toArray();
+      res.send(result);
+    });
+    // get all users for admin
+    app.get("/users", verifyJWT, verifyADMIN, async (req, res) => {
+      const adminEmail = req.tokenEmail;
       const result = await usersCollection
         .find({ email: { $ne: adminEmail } })
         .toArray();
-      res.send(result)
-    })
+      res.send(result);
+    });
 
-    // update a user's role --3
-    app.patch('/update-role', verifyJWT, async(req, res) =>{
-      const {email, role} = req.body
-      const result = await usersCollection.updateOne({email}, {$set: {role}})
-      await sellerRequestsCollection.deleteOne({email})
+    // update a user's role
+    app.patch("/update-role", verifyJWT, verifyADMIN, async (req, res) => {
+      const { email, role } = req.body;
+      const result = await usersCollection.updateOne(
+        { email },
+        { $set: { role } },
+      );
+      await sellerRequestsCollection.deleteOne({ email });
 
-      res.send(result)
-    } )
+      res.send(result);
+    });
 
     // Send a ping to cenfirm a success-ful connection
     await client.db("admin").command({ ping: 1 });
@@ -293,5 +327,5 @@ app.get("/", (req, res) => {
   res.send("Hello from Server...");
 });
 app.listen(port, () => {
-  console.log(`Server is running on port ${port}`);
+  // console.log(`Server is running on port ${port}`);
 });
